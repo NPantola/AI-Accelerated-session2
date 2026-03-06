@@ -1,5 +1,5 @@
 const request = require('supertest');
-const { app, db } = require('../../src/app');
+const { app, db } = require('../src/app');
 
 // Close the database connection after all tests
 afterAll(() => {
