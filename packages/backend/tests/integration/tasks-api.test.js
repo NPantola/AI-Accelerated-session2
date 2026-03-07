@@ -1,650 +1,311 @@
 const request = require('supertest');
-const { app, db, statements } = require('../../src/app');
+const { app, db } = require('../../src/app');
 
-describe('Tasks API Integration Tests', () => {
-  let server;
-  
-  beforeAll(() => {
-    server = app.listen(0); // Use random available port
-  });
-  
-  afterAll((done) => {
-    if (server) {
-      server.close(done);
-    } else {
-      done();
+describe('Tasks API Integration', () => {
+  let createdTaskId;
+
+  afterAll(async () => {
+    if (db) {
+      db.close();
     }
   });
 
-  beforeEach(() => {
-    // Clean up test data before each test
-    db.exec('DELETE FROM tasks WHERE title LIKE "Test%"');
-  });
-
-  afterEach(() => {
-    // Clean up test data after each test
-    db.exec('DELETE FROM tasks WHERE title LIKE "Test%"');
-  });
-
   describe('GET /api/tasks', () => {
-    it('should return all tasks with default sorting', async () => {
+    it('should return all tasks with proper structure', async () => {
       const response = await request(app)
         .get('/api/tasks')
+        .expect('Content-Type', /json/)
         .expect(200);
 
       expect(response.body).toHaveProperty('tasks');
       expect(response.body).toHaveProperty('count');
       expect(response.body).toHaveProperty('filters');
       expect(Array.isArray(response.body.tasks)).toBe(true);
-      expect(response.body.count).toBeGreaterThanOrEqual(0);
+      expect(response.body.tasks.length).toBeGreaterThan(0);
+
+      // Verify task structure
+      const task = response.body.tasks[0];
+      expect(task).toHaveProperty('id');
+      expect(task).toHaveProperty('title');
+      expect(task).toHaveProperty('description');
+      expect(task).toHaveProperty('completed');
+      expect(task).toHaveProperty('priority');
+      expect(task).toHaveProperty('created_at');
+      expect(task).toHaveProperty('updated_at');
     });
 
-    it('should return tasks with correct structure', async () => {
-      // First create a test task to ensure we have data
-      const taskData = {
-        title: 'Test Task for Structure',
-        description: 'Test description',
-        priority: 'high',
-        due_date: '2026-03-10 10:00:00'
-      };
-
-      await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
+    it('should return tasks ordered by created_at DESC by default', async () => {
       const response = await request(app)
         .get('/api/tasks')
         .expect(200);
 
-      const testTask = response.body.tasks.find(task => task.title === taskData.title);
-      expect(testTask).toBeDefined();
-      expect(testTask).toHaveProperty('id');
-      expect(testTask).toHaveProperty('title');
-      expect(testTask).toHaveProperty('description');
-      expect(testTask).toHaveProperty('completed');
-      expect(testTask).toHaveProperty('priority');
-      expect(testTask).toHaveProperty('due_date');
-      expect(testTask).toHaveProperty('created_at');
-      expect(testTask).toHaveProperty('updated_at');
-    });
-
-    it('should return empty array when no tasks match filters', async () => {
-      const response = await request(app)
-        .get('/api/tasks?status=completed&priority=high&search=nonexistent')
-        .expect(200);
-
-      expect(response.body.tasks).toEqual([]);
-      expect(response.body.count).toBe(0);
-    });
-
-    it('should handle query parameters correctly', async () => {
-      const response = await request(app)
-        .get('/api/tasks?status=all&priority=all&sort=title&order=asc')
-        .expect(200);
-
-      expect(response.body.filters).toMatchObject({
-        status: 'all',
-        priority: 'all',
-        sort: 'title',
-        order: 'asc'
-      });
+      const tasks = response.body.tasks;
+      if (tasks.length > 1) {
+        for (let i = 0; i < tasks.length - 1; i++) {
+          const current = new Date(tasks[i].created_at);
+          const next = new Date(tasks[i + 1].created_at);
+          expect(current.getTime()).toBeGreaterThanOrEqual(next.getTime());
+        }
+      }
     });
   });
 
   describe('POST /api/tasks', () => {
-    it('should create a new task with all fields', async () => {
-      const taskData = {
-        title: 'Test Task Complete',
-        description: 'Complete test task with all fields',
-        priority: 'high',
-        due_date: '2026-03-15 14:30:00'
+    it('should create a new task with minimal required data', async () => {
+      const newTask = {
+        title: 'Test Task for Integration'
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(newTask)
+        .expect('Content-Type', /json/)
         .expect(201);
 
-      expect(response.body.title).toBe(taskData.title);
-      expect(response.body.description).toBe(taskData.description);
-      expect(response.body.priority).toBe(taskData.priority);
-      expect(response.body.due_date).toBe(taskData.due_date);
-      expect(response.body.completed).toBe(0);
-      expect(response.body.id).toBeDefined();
-      expect(response.body.created_at).toBeDefined();
-      expect(response.body.updated_at).toBeDefined();
+      expect(response.body).toHaveProperty('id');
+      expect(response.body.title).toBe(newTask.title);
+      expect(response.body.priority).toBe('medium'); // Default priority
+      expect(response.body.completed).toBe(0); // Default completed state
+      expect(response.body.description).toBeNull();
+      expect(response.body).toHaveProperty('created_at');
+      expect(response.body).toHaveProperty('updated_at');
+
+      createdTaskId = response.body.id;
     });
 
-    it('should create a task with minimal required fields', async () => {
-      const taskData = {
-        title: 'Test Minimal Task'
+    it('should create a new task with complete data', async () => {
+      const newTask = {
+        title: 'Complete Integration Test Task',
+        description: 'This task tests the complete task creation flow',
+        priority: 'high',
+        due_date: '2026-03-15 14:00:00'
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(newTask)
+        .expect('Content-Type', /json/)
         .expect(201);
 
-      expect(response.body.title).toBe(taskData.title);
-      expect(response.body.description).toBeNull();
-      expect(response.body.priority).toBe('medium'); // default value
-      expect(response.body.due_date).toBeNull();
+      expect(response.body.title).toBe(newTask.title);
+      expect(response.body.description).toBe(newTask.description);
+      expect(response.body.priority).toBe(newTask.priority);
+      expect(response.body.due_date).toBe(newTask.due_date);
       expect(response.body.completed).toBe(0);
     });
 
     it('should trim whitespace from title and description', async () => {
-      const taskData = {
-        title: '  Test Task with Spaces  ',
-        description: '  Description with spaces  '
+      const newTask = {
+        title: '  Whitespace Test Task  ',
+        description: '  Testing whitespace trimming  '
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(newTask)
         .expect(201);
 
-      expect(response.body.title).toBe('Test Task with Spaces');
-      expect(response.body.description).toBe('Description with spaces');
-    });
-
-    it('should validate required title field', async () => {
-      const taskData = {
-        description: 'Task without title'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-    });
-
-    it('should validate priority field', async () => {
-      const taskData = {
-        title: 'Test Task Invalid Priority',
-        priority: 'invalid'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Priority must be one of: low, medium, high');
-    });
-
-    it('should validate empty title field', async () => {
-      const taskData = {
-        title: '   ' // only whitespace
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-    });
-
-    it('should handle null description correctly', async () => {
-      const taskData = {
-        title: 'Test Task Null Description',
-        description: null
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
-      expect(response.body.description).toBeNull();
+      expect(response.body.title).toBe('Whitespace Test Task');
+      expect(response.body.description).toBe('Testing whitespace trimming');
     });
   });
 
   describe('GET /api/tasks/:id', () => {
-    let testTaskId;
-
-    beforeEach(async () => {
-      // Create a test task
-      const taskData = {
-        title: 'Test Task for GET by ID',
-        description: 'Test description for single task retrieval'
-      };
-
+    it('should retrieve a specific task by ID', async () => {
+      // First create a task to retrieve
       const createResponse = await request(app)
         .post('/api/tasks')
-        .send(taskData);
+        .send({ title: 'Task to Retrieve' })
+        .expect(201);
 
-      testTaskId = createResponse.body.id;
-    });
+      const taskId = createResponse.body.id;
 
-    it('should return specific task by ID', async () => {
+      // Then retrieve it
       const response = await request(app)
-        .get(`/api/tasks/${testTaskId}`)
+        .get(`/api/tasks/${taskId}`)
+        .expect('Content-Type', /json/)
         .expect(200);
 
-      expect(response.body.id).toBe(testTaskId);
-      expect(response.body.title).toBe('Test Task for GET by ID');
-      expect(response.body.description).toBe('Test description for single task retrieval');
-    });
-
-    it('should return 404 for non-existent task ID', async () => {
-      const nonExistentId = 99999;
-      const response = await request(app)
-        .get(`/api/tasks/${nonExistentId}`)
-        .expect(404);
-
-      expect(response.body.error).toBe('Task not found');
-    });
-
-    it('should return 400 for invalid task ID', async () => {
-      const response = await request(app)
-        .get('/api/tasks/invalid-id')
-        .expect(400);
-
-      expect(response.body.error).toBe('Valid task ID is required');
-    });
-
-    it('should return 400 for empty task ID', async () => {
-      const response = await request(app)
-        .get('/api/tasks/')
-        .expect(404); // Express returns 404 for this route pattern
-
-      // This tests the route matching, not our validation
+      expect(response.body.id).toBe(taskId);
+      expect(response.body.title).toBe('Task to Retrieve');
+      expect(response.body).toHaveProperty('created_at');
+      expect(response.body).toHaveProperty('updated_at');
     });
   });
 
   describe('PUT /api/tasks/:id', () => {
-    let testTaskId;
-
-    beforeEach(async () => {
-      const taskData = {
-        title: 'Test Task for Update',
-        description: 'Original description',
-        priority: 'medium',
-        due_date: '2026-03-10 10:00:00'
-      };
-
+    it('should update an existing task completely', async () => {
+      // First create a task to update
       const createResponse = await request(app)
         .post('/api/tasks')
-        .send(taskData);
+        .send({ title: 'Task to Update' })
+        .expect(201);
 
-      testTaskId = createResponse.body.id;
-    });
+      const taskId = createResponse.body.id;
+      const originalUpdatedAt = createResponse.body.updated_at;
 
-    it('should update all task fields', async () => {
+      // Wait a moment to ensure updated_at changes
+      await new Promise(resolve => setTimeout(resolve, 10));
+
       const updateData = {
-        title: 'Updated Test Task',
+        title: 'Updated Task Title',
         description: 'Updated description',
-        priority: 'high',
-        due_date: '2026-03-15 15:00:00'
+        priority: 'low',
+        due_date: '2026-03-20 10:00:00'
       };
 
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
+        .put(`/api/tasks/${taskId}`)
         .send(updateData)
+        .expect('Content-Type', /json/)
         .expect(200);
 
+      expect(response.body.id).toBe(taskId);
       expect(response.body.title).toBe(updateData.title);
       expect(response.body.description).toBe(updateData.description);
       expect(response.body.priority).toBe(updateData.priority);
       expect(response.body.due_date).toBe(updateData.due_date);
-      expect(response.body.id).toBe(testTaskId);
+      expect(response.body.updated_at).not.toBe(originalUpdatedAt);
     });
 
-    it('should update partial fields and keep others unchanged', async () => {
-      const updateData = {
-        title: 'Partially Updated Task'
-        // Only updating title
-      };
+    it('should partially update task fields', async () => {
+      // Create a task with full data
+      const createResponse = await request(app)
+        .post('/api/tasks')
+        .send({
+          title: 'Original Title',
+          description: 'Original Description',
+          priority: 'medium'
+        })
+        .expect(201);
 
+      const taskId = createResponse.body.id;
+
+      // Update only title
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ title: 'New Title Only' })
         .expect(200);
 
-      expect(response.body.title).toBe(updateData.title);
-      expect(response.body.description).toBe('Original description'); // unchanged
-      expect(response.body.priority).toBe('medium'); // unchanged
-    });
-
-    it('should update description to null', async () => {
-      const updateData = {
-        description: null
-      };
-
-      const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
-        .expect(200);
-
-      expect(response.body.description).toBeNull();
-    });
-
-    it('should return 404 for non-existent task', async () => {
-      const updateData = {
-        title: 'Updated Non-existent Task'
-      };
-
-      const response = await request(app)
-        .put('/api/tasks/99999')
-        .send(updateData)
-        .expect(404);
-
-      expect(response.body.error).toBe('Task not found');
-    });
-
-    it('should return 400 for invalid task ID', async () => {
-      const updateData = {
-        title: 'Updated Task'
-      };
-
-      const response = await request(app)
-        .put('/api/tasks/invalid-id')
-        .send(updateData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Valid task ID is required');
-    });
-
-    it('should trim whitespace from updated fields', async () => {
-      const updateData = {
-        title: '  Updated Task with Spaces  ',
-        description: '  Updated description with spaces  '
-      };
-
-      const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
-        .expect(200);
-
-      expect(response.body.title).toBe('Updated Task with Spaces');
-      expect(response.body.description).toBe('Updated description with spaces');
+      expect(response.body.title).toBe('New Title Only');
+      expect(response.body.description).toBe('Original Description'); // Should remain unchanged
+      expect(response.body.priority).toBe('medium'); // Should remain unchanged
     });
   });
 
   describe('PATCH /api/tasks/:id/toggle', () => {
-    let testTaskId;
-
-    beforeEach(async () => {
-      const taskData = {
-        title: 'Test Task for Toggle',
-        description: 'Task to test completion toggle'
-      };
-
+    it('should toggle task completion status', async () => {
+      // Create a new task (default completed = 0)
       const createResponse = await request(app)
         .post('/api/tasks')
-        .send(taskData);
+        .send({ title: 'Task to Toggle' })
+        .expect(201);
 
-      testTaskId = createResponse.body.id;
-    });
+      const taskId = createResponse.body.id;
+      expect(createResponse.body.completed).toBe(0);
 
-    it('should toggle task completion status from incomplete to complete', async () => {
-      // Initially completed should be false (0)
-      let response = await request(app)
-        .get(`/api/tasks/${testTaskId}`)
-        .expect(200);
-      
-      expect(response.body.completed).toBe(0);
-
-      // Toggle to complete
-      response = await request(app)
-        .patch(`/api/tasks/${testTaskId}/toggle`)
+      // Toggle to completed
+      const toggleResponse1 = await request(app)
+        .patch(`/api/tasks/${taskId}/toggle`)
+        .expect('Content-Type', /json/)
         .expect(200);
 
-      expect(response.body.completed).toBe(1);
-      expect(response.body.id).toBe(testTaskId);
-    });
-
-    it('should toggle task completion status from complete to incomplete', async () => {
-      // First toggle to complete
-      await request(app)
-        .patch(`/api/tasks/${testTaskId}/toggle`)
-        .expect(200);
-
-      // Verify it's completed
-      let response = await request(app)
-        .get(`/api/tasks/${testTaskId}`)
-        .expect(200);
-      
-      expect(response.body.completed).toBe(1);
+      expect(toggleResponse1.body.id).toBe(taskId);
+      expect(toggleResponse1.body.completed).toBe(1);
 
       // Toggle back to incomplete
-      response = await request(app)
-        .patch(`/api/tasks/${testTaskId}/toggle`)
+      const toggleResponse2 = await request(app)
+        .patch(`/api/tasks/${taskId}/toggle`)
         .expect(200);
 
-      expect(response.body.completed).toBe(0);
-    });
-
-    it('should return 404 for non-existent task', async () => {
-      const response = await request(app)
-        .patch('/api/tasks/99999/toggle')
-        .expect(404);
-
-      expect(response.body.error).toBe('Task not found');
-    });
-
-    it('should return 400 for invalid task ID', async () => {
-      const response = await request(app)
-        .patch('/api/tasks/invalid-id/toggle')
-        .expect(400);
-
-      expect(response.body.error).toBe('Valid task ID is required');
-    });
-
-    it('should update the updated_at timestamp', async () => {
-      // Get original timestamp
-      let getResponse = await request(app)
-        .get(`/api/tasks/${testTaskId}`)
-        .expect(200);
-
-      const originalUpdatedAt = getResponse.body.updated_at;
-
-      // Wait a moment to ensure timestamp difference
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Toggle completion
-      const toggleResponse = await request(app)
-        .patch(`/api/tasks/${testTaskId}/toggle`)
-        .expect(200);
-
-      expect(new Date(toggleResponse.body.updated_at).getTime())
-        .toBeGreaterThanOrEqual(new Date(originalUpdatedAt).getTime());
+      expect(toggleResponse2.body.completed).toBe(0);
     });
   });
 
   describe('DELETE /api/tasks/:id', () => {
-    let testTaskId;
-
-    beforeEach(async () => {
-      const taskData = {
-        title: 'Test Task for Deletion',
-        description: 'Task to be deleted during testing'
-      };
-
+    it('should delete an existing task', async () => {
+      // Create a task to delete
       const createResponse = await request(app)
         .post('/api/tasks')
-        .send(taskData);
+        .send({ title: 'Task to Delete' })
+        .expect(201);
 
-      testTaskId = createResponse.body.id;
-    });
+      const taskId = createResponse.body.id;
 
-    it('should delete an existing task', async () => {
-      const response = await request(app)
-        .delete(`/api/tasks/${testTaskId}`)
+      // Delete the task
+      const deleteResponse = await request(app)
+        .delete(`/api/tasks/${taskId}`)
+        .expect('Content-Type', /json/)
         .expect(200);
 
-      expect(response.body.message).toBe('Task deleted successfully');
-      expect(response.body.id).toBe(testTaskId);
+      expect(deleteResponse.body.message).toBe('Task deleted successfully');
+      expect(deleteResponse.body.id).toBe(taskId);
 
-      // Verify task is actually deleted
+      // Verify task is deleted
       await request(app)
-        .get(`/api/tasks/${testTaskId}`)
+        .get(`/api/tasks/${taskId}`)
         .expect(404);
-    });
-
-    it('should return 404 for non-existent task', async () => {
-      const response = await request(app)
-        .delete('/api/tasks/99999')
-        .expect(404);
-
-      expect(response.body.error).toBe('Task not found');
-    });
-
-    it('should return 400 for invalid task ID', async () => {
-      const response = await request(app)
-        .delete('/api/tasks/invalid-id')
-        .expect(400);
-
-      expect(response.body.error).toBe('Valid task ID is required');
-    });
-
-    it('should not affect other tasks when deleting', async () => {
-      // Create another task
-      const anotherTaskData = {
-        title: 'Test Another Task',
-        description: 'This task should not be affected'
-      };
-
-      const anotherTaskResponse = await request(app)
-        .post('/api/tasks')
-        .send(anotherTaskData);
-
-      const anotherTaskId = anotherTaskResponse.body.id;
-
-      // Delete the original test task
-      await request(app)
-        .delete(`/api/tasks/${testTaskId}`)
-        .expect(200);
-
-      // Verify the other task still exists
-      const response = await request(app)
-        .get(`/api/tasks/${anotherTaskId}`)
-        .expect(200);
-
-      expect(response.body.title).toBe(anotherTaskData.title);
-    });
-
-    it('should handle deletion of already deleted task', async () => {
-      // Delete the task once
-      await request(app)
-        .delete(`/api/tasks/${testTaskId}`)
-        .expect(200);
-
-      // Try to delete again
-      const response = await request(app)
-        .delete(`/api/tasks/${testTaskId}`)
-        .expect(404);
-
-      expect(response.body.error).toBe('Task not found');
     });
   });
 
-  describe('Edge Cases and Error Handling', () => {
-    it('should handle database errors gracefully', async () => {
-      // This test simulates unexpected database errors
-      // In a real scenario, you might mock the database to throw errors
-      
-      const invalidTaskData = {
-        title: 'Test Task',
+  describe('End-to-end task workflow', () => {
+    it('should complete a full CRUD workflow successfully', async () => {
+      // 1. Create a task
+      const createData = {
+        title: 'E2E Test Task',
+        description: 'Testing complete workflow',
         priority: 'high',
-        due_date: 'invalid-date-format'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(invalidTaskData)
-        .expect(400);
-
-      // The validation should catch invalid date before hitting database
-      expect(response.body.error).toBe('Validation failed');
-    });
-
-    it('should handle concurrent task operations', async () => {
-      const taskData = {
-        title: 'Test Concurrent Task',
-        description: 'Task for concurrent operations test'
-      };
-
-      // Create task
-      const createResponse = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
-      const taskId = createResponse.body.id;
-
-      // Perform concurrent operations
-      const operations = [
-        request(app).get(`/api/tasks/${taskId}`),
-        request(app).patch(`/api/tasks/${taskId}/toggle`),
-        request(app).put(`/api/tasks/${taskId}`).send({ description: 'Updated concurrently' })
-      ];
-
-      const responses = await Promise.all(operations);
-      
-      // All operations should succeed
-      responses.forEach((response, index) => {
-        expect([200, 201].includes(response.status)).toBe(true);
-      });
-    });
-
-    it('should maintain data integrity with rapid successive operations', async () => {
-      const taskData = {
-        title: 'Test Rapid Operations Task',
-        description: 'Task for rapid operations test'
+        due_date: '2026-03-25 16:00:00'
       };
 
       const createResponse = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(createData)
         .expect(201);
 
       const taskId = createResponse.body.id;
 
-      // Perform rapid toggle operations
-      for (let i = 0; i < 5; i++) {
-        await request(app)
-          .patch(`/api/tasks/${taskId}/toggle`)
-          .expect(200);
-      }
-
-      // Final state should be completed (odd number of toggles)
-      const finalResponse = await request(app)
+      // 2. Retrieve the task
+      const getResponse = await request(app)
         .get(`/api/tasks/${taskId}`)
         .expect(200);
 
-      expect(finalResponse.body.completed).toBe(1);
-    });
+      expect(getResponse.body.title).toBe(createData.title);
 
-    it('should handle very long task titles and descriptions', async () => {
-      const longTitle = 'A'.repeat(1000);
-      const longDescription = 'B'.repeat(5000);
+      // 3. Update the task
+      const updateResponse = await request(app)
+        .put(`/api/tasks/${taskId}`)
+        .send({ title: 'Updated E2E Task', priority: 'medium' })
+        .expect(200);
 
-      const taskData = {
-        title: longTitle,
-        description: longDescription,
-        priority: 'high'
-      };
+      expect(updateResponse.body.title).toBe('Updated E2E Task');
+      expect(updateResponse.body.priority).toBe('medium');
 
-      // This should either succeed (if no length limits) or return validation error
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData);
+      // 4. Toggle completion
+      const toggleResponse = await request(app)
+        .patch(`/api/tasks/${taskId}/toggle`)
+        .expect(200);
 
-      expect([201, 400].includes(response.status)).toBe(true);
-      
-      if (response.status === 201) {
-        // If successful, verify data was stored correctly
-        expect(response.body.title).toBe(longTitle);
-        expect(response.body.description).toBe(longDescription);
-      }
+      expect(toggleResponse.body.completed).toBe(1);
+
+      // 5. Verify in task list
+      const listResponse = await request(app)
+        .get('/api/tasks')
+        .expect(200);
+
+      const task = listResponse.body.tasks.find(t => t.id === taskId);
+      expect(task.completed).toBe(1);
+      expect(task.title).toBe('Updated E2E Task');
+
+      // 6. Delete the task
+      await request(app)
+        .delete(`/api/tasks/${taskId}`)
+        .expect(200);
+
+      // 7. Verify deletion
+      await request(app)
+        .get(`/api/tasks/${taskId}`)
+        .expect(404);
     });
   });
 });

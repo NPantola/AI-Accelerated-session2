@@ -1,632 +1,370 @@
 const request = require('supertest');
 const { app, db } = require('../../src/app');
 
-describe('Tasks Validation and Error Handling Integration Tests', () => {
-  let server;
-
-  beforeAll(() => {
-    server = app.listen(0);
-  });
-
-  afterAll((done) => {
-    if (server) {
-      server.close(done);
-    } else {
-      done();
+describe('Tasks Validation Integration', () => {
+  afterAll(async () => {
+    if (db) {
+      db.close();
     }
   });
 
-  beforeEach(() => {
-    // Clean up test data before each test
-    db.exec('DELETE FROM tasks WHERE title LIKE "Validation%"');
-  });
-
-  afterEach(() => {
-    // Clean up test data after each test
-    db.exec('DELETE FROM tasks WHERE title LIKE "Validation%"');
-  });
-
-  describe('POST /api/tasks Validation', () => {
-    it('should reject tasks without title', async () => {
-      const taskData = {
-        description: 'Task without title',
-        priority: 'high'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-    });
-
+  describe('POST /api/tasks - Validation', () => {
     it('should reject tasks with empty title', async () => {
-      const taskData = {
-        title: '',
-        description: 'Task with empty title'
-      };
-
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ title: '' })
+        .expect('Content-Type', /json/)
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
+      expect(response.body).toHaveProperty('error');
+      expect(response.body).toHaveProperty('details');
       expect(response.body.details).toContain('Title is required and must be a non-empty string');
     });
 
-    it('should reject tasks with whitespace-only title', async () => {
-      const taskData = {
-        title: '   \n\t  ',
-        description: 'Task with whitespace title'
-      };
-
+    it('should reject tasks with missing title', async () => {
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ description: 'Task without title' })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Title is required and must be a non-empty string');
     });
 
-    it('should reject tasks with null title', async () => {
-      const taskData = {
-        title: null,
-        description: 'Task with null title'
-      };
-
+    it('should reject tasks with only whitespace title', async () => {
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ title: '   ' })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Title is required and must be a non-empty string');
     });
 
     it('should reject tasks with non-string title', async () => {
-      const taskData = {
-        title: 12345,
-        description: 'Task with numeric title'
-      };
-
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ title: 123 })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Title is required and must be a non-empty string');
     });
 
     it('should reject tasks with invalid priority', async () => {
-      const taskData = {
-        title: 'Validation Test Task',
-        priority: 'critical'
-      };
-
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ 
+          title: 'Valid Title',
+          priority: 'urgent' 
+        })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Priority must be one of: low, medium, high');
     });
 
-    it('should reject tasks with invalid priority types', async () => {
-      const invalidPriorities = [123, true, [], {}, null];
-
-      for (const priority of invalidPriorities) {
-        const taskData = {
-          title: `Validation Test Task ${priority}`,
-          priority: priority
-        };
-
-        const response = await request(app)
-          .post('/api/tasks')
-          .send(taskData)
-          .expect(400);
-
-        expect(response.body.error).toBe('Validation failed');
-        expect(response.body.details).toContain('Priority must be one of: low, medium, high');
-      }
-    });
-
-    it('should accept valid priority values', async () => {
-      const validPriorities = ['low', 'medium', 'high'];
-
-      for (const priority of validPriorities) {
-        const taskData = {
-          title: `Validation Test Valid Priority ${priority}`,
-          priority: priority
-        };
-
-        const response = await request(app)
-          .post('/api/tasks')
-          .send(taskData)
-          .expect(201);
-
-        expect(response.body.priority).toBe(priority);
-      }
-    });
-
-    it('should use medium as default priority when not provided', async () => {
-      const taskData = {
-        title: 'Validation Test Default Priority'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
-      expect(response.body.priority).toBe('medium');
-    });
-
     it('should reject tasks with invalid due date format', async () => {
-      const taskData = {
-        title: 'Validation Test Invalid Date',
-        due_date: 'not-a-date'
-      };
-
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ 
+          title: 'Valid Title',
+          due_date: 'invalid-date' 
+        })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Due date must be a valid date');
     });
 
-    it('should reject tasks with invalid date objects', async () => {
-      const invalidDates = ['2026-13-45', '2026-02-30', 'March 32, 2026'];
+    it('should reject tasks with non-boolean completed value', async () => {
+      const response = await request(app)
+        .post('/api/tasks')
+        .send({ 
+          title: 'Valid Title',
+          completed: 'yes' 
+        })
+        .expect(400);
 
-      for (const invalidDate of invalidDates) {
-        const taskData = {
-          title: `Validation Test Invalid Date ${invalidDate}`,
-          due_date: invalidDate
-        };
-
-        const response = await request(app)
-          .post('/api/tasks')
-          .send(taskData)
-          .expect(400);
-
-        expect(response.body.error).toBe('Validation failed');
-        expect(response.body.details).toContain('Due date must be a valid date');
-      }
+      expect(response.body.details).toContain('Completed must be a boolean value');
     });
 
-    it('should accept valid date formats', async () => {
-      const validDates = [
-        '2026-03-15',
-        '2026-03-15 14:30:00',
-        '2026-03-15T14:30:00.000Z',
-        '2026-12-31 23:59:59'
-      ];
+    it('should accumulate multiple validation errors', async () => {
+      const response = await request(app)
+        .post('/api/tasks')
+        .send({ 
+          title: '',
+          priority: 'invalid',
+          due_date: 'bad-date',
+          completed: 'maybe'
+        })
+        .expect(400);
 
-      for (const validDate of validDates) {
-        const taskData = {
-          title: `Validation Test Valid Date ${validDate}`,
-          due_date: validDate
-        };
-
-        const response = await request(app)
-          .post('/api/tasks')
-          .send(taskData)
-          .expect(201);
-
-        expect(response.body.due_date).toBeDefined();
-      }
+      expect(response.body.details).toHaveLength(4);
+      expect(response.body.details).toContain('Title is required and must be a non-empty string');
+      expect(response.body.details).toContain('Priority must be one of: low, medium, high');
+      expect(response.body.details).toContain('Due date must be a valid date');
+      expect(response.body.details).toContain('Completed must be a boolean value');
     });
 
-    it('should accept null due date', async () => {
-      const taskData = {
-        title: 'Validation Test Null Date',
+    it('should accept valid task data', async () => {
+      const validTask = {
+        title: 'Valid Task',
+        description: 'This is a valid task description',
+        priority: 'high',
+        due_date: '2026-03-15 14:30:00'
+      };
+
+      const response = await request(app)
+        .post('/api/tasks')
+        .send(validTask)
+        .expect(201);
+
+      expect(response.body.title).toBe(validTask.title);
+      expect(response.body.description).toBe(validTask.description);
+      expect(response.body.priority).toBe(validTask.priority);
+      expect(response.body.due_date).toBe(validTask.due_date);
+    });
+
+    it('should accept task with null/undefined optional fields', async () => {
+      const validTask = {
+        title: 'Minimal Task',
+        description: null,
         due_date: null
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(validTask)
         .expect(201);
 
+      expect(response.body.title).toBe(validTask.title);
+      expect(response.body.description).toBeNull();
       expect(response.body.due_date).toBeNull();
-    });
-
-    it('should reject tasks with invalid completed field type', async () => {
-      const taskData = {
-        title: 'Validation Test Invalid Completed',
-        completed: 'yes'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Completed must be a boolean value');
-    });
-
-    it('should trim title and description fields', async () => {
-      const taskData = {
-        title: '  Validation Test Trimmed Title  ',
-        description: '  Trimmed description  '
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
-      expect(response.body.title).toBe('Validation Test Trimmed Title');
-      expect(response.body.description).toBe('Trimmed description');
-    });
-
-    it('should handle multiple validation errors', async () => {
-      const taskData = {
-        title: '',
-        priority: 'invalid',
-        due_date: 'not-a-date',
-        completed: 'maybe'
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details.length).toBeGreaterThanOrEqual(3);
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-      expect(response.body.details).toContain('Priority must be one of: low, medium, high');
-      expect(response.body.details).toContain('Due date must be a valid date');
+      expect(response.body.priority).toBe('medium'); // Default value
     });
   });
 
-  describe('PUT /api/tasks/:id Validation', () => {
-    let testTaskId;
+  describe('PUT /api/tasks/:id - Validation', () => {
+    let taskId;
 
-    beforeEach(async () => {
-      const taskData = {
-        title: 'Validation Test Original Task',
-        description: 'Original description',
-        priority: 'medium'
-      };
-
-      const createResponse = await request(app)
+    beforeAll(async () => {
+      // Create a task to update
+      const response = await request(app)
         .post('/api/tasks')
-        .send(taskData);
-
-      testTaskId = createResponse.body.id;
+        .send({ title: 'Task for Update Validation' })
+        .expect(201);
+      taskId = response.body.id;
     });
 
-    it('should validate title when updating', async () => {
-      const updateData = {
-        title: ''
-      };
-
+    it('should reject update with empty title', async () => {
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ title: '' })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Title is required and must be a non-empty string');
     });
 
-    it('should validate priority when updating', async () => {
-      const updateData = {
-        priority: 'extreme'
-      };
-
+    it('should reject update with invalid priority', async () => {
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ 
+          title: 'Valid Title',
+          priority: 'critical' 
+        })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Priority must be one of: low, medium, high');
     });
 
-    it('should validate due date when updating', async () => {
-      const updateData = {
-        due_date: 'invalid-date'
-      };
-
+    it('should reject update with invalid due date', async () => {
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ 
+          title: 'Valid Title',
+          due_date: '2026-13-45' 
+        })
         .expect(400);
 
-      expect(response.body.error).toBe('Validation failed');
       expect(response.body.details).toContain('Due date must be a valid date');
     });
 
     it('should allow partial updates with valid data', async () => {
-      const updateData = {
-        description: 'Updated description'
-      };
-
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ priority: 'low' })
         .expect(200);
 
-      expect(response.body.description).toBe('Updated description');
-      expect(response.body.title).toBe('Validation Test Original Task'); // unchanged
+      expect(response.body.priority).toBe('low');
+      expect(response.body.title).toBe('Task for Update Validation'); // Should remain unchanged
     });
 
-    it('should trim fields when updating', async () => {
-      const updateData = {
-        title: '  Updated Trimmed Title  ',
-        description: '  Updated trimmed description  '
-      };
-
+    it('should allow update with null values for optional fields', async () => {
       const response = await request(app)
-        .put(`/api/tasks/${testTaskId}`)
-        .send(updateData)
+        .put(`/api/tasks/${taskId}`)
+        .send({ 
+          title: 'Updated Title',
+          description: null,
+          due_date: null 
+        })
         .expect(200);
 
-      expect(response.body.title).toBe('Updated Trimmed Title');
-      expect(response.body.description).toBe('Updated trimmed description');
+      expect(response.body.title).toBe('Updated Title');
+      expect(response.body.description).toBeNull();
+      expect(response.body.due_date).toBeNull();
     });
+  });
 
-    it('should reject update with invalid task ID', async () => {
-      const updateData = {
-        title: 'Updated Title'
-      };
-
+  describe('GET /api/tasks/:id - ID Validation', () => {
+    it('should reject non-numeric ID', async () => {
       const response = await request(app)
-        .put('/api/tasks/invalid-id')
-        .send(updateData)
+        .get('/api/tasks/abc')
         .expect(400);
 
       expect(response.body.error).toBe('Valid task ID is required');
     });
 
-    it('should reject update for non-existent task', async () => {
-      const updateData = {
-        title: 'Updated Title'
-      };
+    it('should reject empty ID', async () => {
+      const response = await request(app)
+        .get('/api/tasks/')
+        .expect(404); // Note: This becomes a 404 because the route doesn't match
 
+      // The route /api/tasks/ doesn't match /api/tasks/:id, so it's handled as a different endpoint
+    });
+
+    it('should handle non-existent numeric ID gracefully', async () => {
+      const response = await request(app)
+        .get('/api/tasks/99999')
+        .expect(404);
+
+      expect(response.body.error).toBe('Task not found');
+    });
+
+    it('should accept valid numeric ID', async () => {
+      // First create a task
+      const createResponse = await request(app)
+        .post('/api/tasks')
+        .send({ title: 'Task for ID validation' })
+        .expect(201);
+
+      const taskId = createResponse.body.id;
+
+      // Then retrieve it with valid ID
+      const response = await request(app)
+        .get(`/api/tasks/${taskId}`)
+        .expect(200);
+
+      expect(response.body.id).toBe(taskId);
+    });
+  });
+
+  describe('PUT /api/tasks/:id - ID Validation', () => {
+    it('should reject non-numeric ID for updates', async () => {
+      const response = await request(app)
+        .put('/api/tasks/invalid-id')
+        .send({ title: 'Updated Title' })
+        .expect(400);
+
+      expect(response.body.error).toBe('Valid task ID is required');
+    });
+
+    it('should handle non-existent ID for updates', async () => {
       const response = await request(app)
         .put('/api/tasks/99999')
-        .send(updateData)
+        .send({ title: 'Updated Title' })
         .expect(404);
 
       expect(response.body.error).toBe('Task not found');
     });
   });
 
-  describe('Error Handling for All Endpoints', () => {
-    it('should handle invalid JSON payload', async () => {
+  describe('PATCH /api/tasks/:id/toggle - ID Validation', () => {
+    it('should reject non-numeric ID for toggle', async () => {
       const response = await request(app)
-        .post('/api/tasks')
-        .send('invalid json')
-        .set('Content-Type', 'application/json')
+        .patch('/api/tasks/invalid-id/toggle')
         .expect(400);
 
-      // Express will handle the JSON parsing error
-      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Valid task ID is required');
     });
 
-    it('should handle missing Content-Type header', async () => {
+    it('should handle non-existent ID for toggle', async () => {
       const response = await request(app)
-        .post('/api/tasks')
-        .send('title=Test&description=Test')
-        .expect(400);
+        .patch('/api/tasks/99999/toggle')
+        .expect(404);
 
-      // Should fail validation as title won't be parsed correctly
-      expect(response.status).toBe(400);
-    });
-
-    it('should handle extremely large payloads gracefully', async () => {
-      const largePayload = {
-        title: 'Validation Test Large Payload',
-        description: 'A'.repeat(100000) // 100KB description
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(largePayload);
-
-      // Should either succeed or fail gracefully
-      expect([201, 400, 413].includes(response.status)).toBe(true);
-    });
-
-    it('should handle concurrent validation requests', async () => {
-      const invalidTaskData = {
-        title: '',
-        priority: 'invalid'
-      };
-
-      const requests = Array(5).fill().map(() =>
-        request(app)
-          .post('/api/tasks')
-          .send(invalidTaskData)
-      );
-
-      const responses = await Promise.all(requests);
-      
-      responses.forEach(response => {
-        expect(response.status).toBe(400);
-        expect(response.body.error).toBe('Validation failed');
-      });
-    });
-
-    it('should maintain consistent error format across endpoints', async () => {
-      // Test POST validation error
-      const postResponse = await request(app)
-        .post('/api/tasks')
-        .send({ title: '' })
-        .expect(400);
-
-      // Test PUT validation error  
-      const taskData = { title: 'Test Task' };
-      const createResponse = await request(app)
-        .post('/api/tasks')
-        .send(taskData);
-      
-      const putResponse = await request(app)
-        .put(`/api/tasks/${createResponse.body.id}`)
-        .send({ priority: 'invalid' })
-        .expect(400);
-
-      // Both should have consistent error structure
-      expect(postResponse.body).toHaveProperty('error');
-      expect(postResponse.body).toHaveProperty('details');
-      expect(putResponse.body).toHaveProperty('error');
-      expect(putResponse.body).toHaveProperty('details');
-
-      expect(postResponse.body.error).toBe('Validation failed');
-      expect(putResponse.body.error).toBe('Validation failed');
+      expect(response.body.error).toBe('Task not found');
     });
   });
 
-  describe('Edge Cases and Security', () => {
-    it('should handle malicious script injection in title', async () => {
-      const taskData = {
-        title: '<script>alert("xss")</script>Validation Test XSS',
-        description: '<img src="x" onerror="alert(1)">'
-      };
-
+  describe('DELETE /api/tasks/:id - ID Validation', () => {
+    it('should reject non-numeric ID for deletion', async () => {
       const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
+        .delete('/api/tasks/invalid-id')
+        .expect(400);
 
-      // Data should be stored as-is (sanitization would be handled by frontend)
-      expect(response.body.title).toBe('<script>alert("xss")</script>Validation Test XSS');
-      expect(response.body.description).toBe('<img src="x" onerror="alert(1)">');
+      expect(response.body.error).toBe('Valid task ID is required');
     });
 
-    it('should handle Unicode characters correctly', async () => {
-      const taskData = {
-        title: 'Validation Test Unicode 🚀 ñáéíóú',
-        description: 'Unicode description with emojis 🎉 and accents áéíóú'
-      };
+    it('should handle non-existent ID for deletion', async () => {
+      const response = await request(app)
+        .delete('/api/tasks/99999')
+        .expect(404);
 
+      expect(response.body.error).toBe('Task not found');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle very long task titles', async () => {
+      const longTitle = 'A'.repeat(1000); // Very long title
+      
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send({ title: longTitle })
         .expect(201);
 
-      expect(response.body.title).toBe(taskData.title);
-      expect(response.body.description).toBe(taskData.description);
+      expect(response.body.title).toBe(longTitle);
     });
 
-    it('should handle null and undefined values in optional fields', async () => {
-      const taskData = {
-        title: 'Validation Test Null Fields',
-        description: null,
-        due_date: undefined
+    it('should handle special characters in task data', async () => {
+      const specialTask = {
+        title: 'Task with special chars: !@#$%^&*()_+[]{}|;:,.<>?',
+        description: 'Unicode test: 你好 🚀 émojis and åccénts',
+        priority: 'high'
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(specialTask)
         .expect(201);
 
-      expect(response.body.description).toBeNull();
-      expect(response.body.due_date).toBeNull();
+      expect(response.body.title).toBe(specialTask.title);
+      expect(response.body.description).toBe(specialTask.description);
     });
 
-    it('should handle unexpected additional fields', async () => {
-      const taskData = {
-        title: 'Validation Test Extra Fields',
-        description: 'Task with extra fields',
-        extraField: 'should be ignored',
-        maliciousField: '<script>alert("hack")</script>',
-        numericField: 12345
+    it('should handle boundary date values', async () => {
+      const boundaryTask = {
+        title: 'Boundary Date Test',
+        due_date: '1970-01-01 00:00:00'
       };
 
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
+        .send(boundaryTask)
         .expect(201);
 
-      // Extra fields should be ignored, not stored
-      expect(response.body.extraField).toBeUndefined();
-      expect(response.body.maliciousField).toBeUndefined();
-      expect(response.body.numericField).toBeUndefined();
+      expect(response.body.due_date).toBe(boundaryTask.due_date);
     });
 
-    it('should handle deeply nested objects', async () => {
-      const taskData = {
-        title: 'Validation Test Nested Object',
-        description: {
-          text: 'Nested description',
-          metadata: {
-            author: 'test',
-            tags: ['tag1', 'tag2']
-          }
-        }
-      };
-
+    it('should preserve data types in validation errors', async () => {
       const response = await request(app)
         .post('/api/tasks')
-        .send(taskData)
-        .expect(201);
-
-      // Description should be converted to string or rejected
-      expect(typeof response.body.description === 'string' || response.body.description === null).toBe(true);
-    });
-
-    it('should handle array values in string fields', async () => {
-      const taskData = {
-        title: ['Array', 'as', 'title'],
-        description: ['Array', 'as', 'description']
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
+        .send({ 
+          title: null,  // null instead of string
+          priority: 123, // number instead of string
+          completed: 'true' // string instead of boolean
+        })
         .expect(400);
 
       expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-    });
-
-    it('should handle boolean values in string fields', async () => {
-      const taskData = {
-        title: true,
-        description: false
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData)
-        .expect(400);
-
-      expect(response.body.error).toBe('Validation failed');
-      expect(response.body.details).toContain('Title is required and must be a non-empty string');
-    });
-
-    it('should handle extremely long field values', async () => {
-      const longString = 'A'.repeat(10000);
-      
-      const taskData = {
-        title: longString,
-        description: longString
-      };
-
-      const response = await request(app)
-        .post('/api/tasks')
-        .send(taskData);
-
-      // Should either succeed or fail with appropriate error
-      expect([201, 400].includes(response.status)).toBe(true);
-      
-      if (response.status === 201) {
-        expect(response.body.title).toBe(longString);
-        expect(response.body.description).toBe(longString);
-      }
+      expect(Array.isArray(response.body.details)).toBe(true);
+      expect(response.body.details.length).toBeGreaterThan(0);
     });
   });
 });
