@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { rest } from 'msw';
 import { setupServer } from 'msw/node';
-import App from '../src/App';
+import App from '../App';
 
 // Mock server to intercept API requests
 const server = setupServer(
